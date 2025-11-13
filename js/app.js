@@ -313,7 +313,14 @@ async function exportToWord() {
         return;
     }
 
+    // Check if docx library is loaded
+    if (typeof docx === 'undefined') {
+        showError('Document generation library not loaded. Please refresh the page and try again.');
+        return;
+    }
+
     try {
+        console.log('docx object:', docx);
         const { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel, UnderlineType } = docx;
 
         const children = [];
