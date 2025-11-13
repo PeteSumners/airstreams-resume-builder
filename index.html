@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resume Builder</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Airstreams Resume Builder</h1>
+            <p>Load JSON or Word document and export to professional resume</p>
+        </header>
+
+        <main>
+            <section class="upload-section">
+                <div class="upload-options">
+                    <div class="upload-box">
+                        <label for="jsonFile" class="upload-label">
+                            <span class="upload-icon">📄</span>
+                            <span>Choose JSON File</span>
+                        </label>
+                        <input type="file" id="jsonFile" accept=".json" class="file-input">
+                    </div>
+                    <div class="upload-separator">OR</div>
+                    <div class="upload-box">
+                        <label for="docxFile" class="upload-label">
+                            <span class="upload-icon">📝</span>
+                            <span>Import Word Document</span>
+                        </label>
+                        <input type="file" id="docxFile" accept=".docx,.doc" class="file-input">
+                    </div>
+                </div>
+            </section>
+
+            <section class="preview-section" id="previewSection" style="display: none;">
+                <h2>Resume Preview</h2>
+                <div id="resumePreview" class="resume-preview"></div>
+
+                <div class="actions">
+                    <button id="exportBtn" class="btn btn-primary">Export to Word (.docx)</button>
+                    <button id="exportJsonBtn" class="btn btn-secondary">Export to JSON</button>
+                    <button id="loadNewBtn" class="btn btn-secondary">Load New File</button>
+                </div>
+            </section>
+
+            <section class="error-section" id="errorSection" style="display: none;">
+                <div class="error-message" id="errorMessage"></div>
+            </section>
+        </main>
+
+        <footer>
+            <p>Supports JSON format with contact, objective, skills, certificates, education, and experience fields</p>
+        </footer>
+    </div>
+
+    <!-- Include libraries from CDN -->
+    <script src="https://unpkg.com/docx@8.5.0/build/index.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
