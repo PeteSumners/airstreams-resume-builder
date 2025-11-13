@@ -37,18 +37,31 @@ async function handleDocxFileSelect(event) {
     const file = event.target.files[0];
     if (!file) return;
 
+    // Check if mammoth library is loaded
+    if (typeof mammoth === 'undefined') {
+        showError('Document parsing library not loaded. Please refresh the page and try again.');
+        return;
+    }
+
     try {
+        console.log('Reading file:', file.name);
         const arrayBuffer = await file.arrayBuffer();
+        console.log('File loaded, extracting text...');
+
         const result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
         const text = result.value;
+        console.log('Text extracted, length:', text.length);
 
         // Parse the extracted text into structured JSON
         resumeData = parseResumeText(text);
+        console.log('Resume data parsed:', resumeData);
+
         displayPreview(resumeData);
         showSection('previewSection');
         hideSection('errorSection');
     } catch (error) {
-        showError('Error reading Word document: ' + error.message);
+        console.error('Error details:', error);
+        showError('Error reading Word document: ' + error.message + '. Please make sure the file is a valid .docx file.');
     }
 }
 
