@@ -57,18 +57,34 @@
 
     <!-- Include libraries from CDN and local -->
     <script src="js/docx.min.js"></script>
+    <script>
+        // Save reference to original docx before docx-preview loads
+        window.docxLib = window.docx;
+    </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
     <script src="https://unpkg.com/mammoth@1.8.0/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://unpkg.com/docx-preview@0.3.7/dist/docx-preview.min.js"></script>
     <script>
         // Verify libraries loaded
         window.addEventListener('DOMContentLoaded', function() {
-            console.log('Window.docx:', window.docx);
-            console.log('docx library loaded:', typeof docx !== 'undefined');
-            if (typeof docx !== 'undefined') {
-                console.log('docx object keys:', Object.keys(docx));
-            }
+            console.log('=== Library Check ===');
+            console.log('window.docx:', typeof window.docx, window.docx);
+            console.log('window.docxPreview:', typeof window.docxPreview);
+            console.log('window.renderAsync:', typeof window.renderAsync);
+            console.log('window.docx.renderAsync:', window.docx && typeof window.docx.renderAsync);
+
+            // Check all window properties for docx-related
+            console.log('All window properties containing "docx" or "render":');
+            Object.keys(window).filter(key =>
+                key.toLowerCase().includes('docx') ||
+                key.toLowerCase().includes('render')
+            ).forEach(key => {
+                console.log(`  ${key}:`, typeof window[key]);
+            });
+
             console.log('FileSaver loaded:', typeof saveAs !== 'undefined');
-            console.log('mammoth library loaded:', typeof mammoth !== 'undefined');
+            console.log('mammoth loaded:', typeof mammoth !== 'undefined');
         });
     </script>
     <script src="js/app.js"></script>

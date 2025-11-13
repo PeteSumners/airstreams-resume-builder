@@ -37,8 +37,8 @@ async function handleDocxFileSelect(event) {
     const file = event.target.files[0];
     if (!file) return;
 
-    // Check if mammoth library is loaded
-    if (typeof mammoth === 'undefined') {
+    // Check if JSZip library is loaded
+    if (typeof JSZip === 'undefined') {
         showError('Document parsing library not loaded. Please refresh the page and try again.');
         return;
     }
@@ -46,14 +46,20 @@ async function handleDocxFileSelect(event) {
     try {
         console.log('Reading file:', file.name);
         const arrayBuffer = await file.arrayBuffer();
-        console.log('File loaded, extracting text...');
+        console.log('File loaded, parsing docx structure...');
 
-        const result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
-        const text = result.value;
-        console.log('Text extracted, length:', text.length);
+        // Parse the docx file using JSZip
+        const zip = await JSZip.loadAsync(arrayBuffer);
+        const documentXml = await zip.file('word/document.xml').async('text');
 
-        // Parse the extracted text into structured JSON
-        resumeData = parseResumeText(text);
+        console.log('Document XML loaded, parsing tables...');
+
+        // Parse the XML to extract table data
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(documentXml, 'text/xml');
+
+        // Extract structured data from tables
+        resumeData = parseDocxTables(xmlDoc);
         console.log('Resume data parsed:', resumeData);
 
         displayPreview(resumeData);
@@ -63,6 +69,174 @@ async function handleDocxFileSelect(event) {
         console.error('Error details:', error);
         showError('Error reading Word document: ' + error.message + '. Please make sure the file is a valid .docx file.');
     }
+}
+
+function parseDocxTables(xmlDoc) {
+    const data = {
+        contact: {},
+        objective: '',
+        skills: [],
+        certificates: [],
+        education: [],
+        experience: []
+    };
+
+    // Helper function to get text from a cell
+    function getCellText(cell) {
+        const textNodes = cell.getElementsByTagNameNS('*', 't');
+        let text = '';
+        for (let i = 0; i < textNodes.length; i++) {
+            text += textNodes[i].textContent;
+        }
+        return text.trim();
+    }
+
+    // Helper function to get all paragraphs from a cell
+    function getCellParagraphs(cell) {
+        const paragraphs = [];
+        const pNodes = cell.getElementsByTagNameNS('*', 'p');
+        for (let i = 0; i < pNodes.length; i++) {
+            const text = getCellText(pNodes[i]);
+            if (text) paragraphs.push(text);
+        }
+        return paragraphs;
+    }
+
+    // Get all tables
+    const tables = xmlDoc.getElementsByTagNameNS('*', 'tbl');
+    console.log('Found', tables.length, 'tables');
+
+    if (tables.length < 6) {
+        console.warn('Expected at least 6 tables, found', tables.length);
+    }
+
+    // Table 0: Contact Information (2x2)
+    if (tables[0]) {
+        const rows = tables[0].getElementsByTagNameNS('*', 'tr');
+        if (rows.length >= 2) {
+            const row0Cells = rows[0].getElementsByTagNameNS('*', 'tc');
+            const row1Cells = rows[1].getElementsByTagNameNS('*', 'tc');
+
+            if (row0Cells.length >= 2) {
+                data.contact.name = getCellText(row0Cells[0]);
+                data.contact.phone = getCellText(row0Cells[1]);
+            }
+            if (row1Cells.length >= 2) {
+                data.contact.location = getCellText(row1Cells[0]);
+                data.contact.email = getCellText(row1Cells[1]);
+            }
+        }
+    }
+
+    // Table 1: Objective
+    if (tables[1]) {
+        const rows = tables[1].getElementsByTagNameNS('*', 'tr');
+        if (rows.length > 0) {
+            const cells = rows[0].getElementsByTagNameNS('*', 'tc');
+            if (cells.length > 0) {
+                data.objective = getCellText(cells[0]);
+            }
+        }
+    }
+
+    // Table 2: Skills (2 columns)
+    if (tables[2]) {
+        const rows = tables[2].getElementsByTagNameNS('*', 'tr');
+        for (let i = 0; i < rows.length; i++) {
+            const cells = rows[i].getElementsByTagNameNS('*', 'tc');
+            for (let j = 0; j < cells.length; j++) {
+                const paragraphs = getCellParagraphs(cells[j]);
+                paragraphs.forEach(p => {
+                    if (p) data.skills.push(p);
+                });
+            }
+        }
+    }
+
+    // Table 3: Certificates (2 columns)
+    if (tables[3]) {
+        const rows = tables[3].getElementsByTagNameNS('*', 'tr');
+        for (let i = 0; i < rows.length; i++) {
+            const cells = rows[i].getElementsByTagNameNS('*', 'tc');
+            for (let j = 0; j < cells.length; j++) {
+                const text = getCellText(cells[j]);
+                if (text) data.certificates.push(text);
+            }
+        }
+    }
+
+    // Table 4: Education (institution/date layout)
+    if (tables[4]) {
+        const rows = tables[4].getElementsByTagNameNS('*', 'tr');
+        let i = 0;
+        while (i < rows.length) {
+            const cells = rows[i].getElementsByTagNameNS('*', 'tc');
+            if (cells.length >= 2) {
+                const institutionParagraphs = getCellParagraphs(cells[0]);
+                const dates = getCellText(cells[1]);
+
+                const eduEntry = {
+                    institution: institutionParagraphs[0] || '',
+                    degree: institutionParagraphs[1] || '',
+                    dates: dates,
+                    location: '',
+                    details: []
+                };
+
+                // Check if next row has details
+                if (i + 1 < rows.length) {
+                    const nextCells = rows[i + 1].getElementsByTagNameNS('*', 'tc');
+                    if (nextCells.length > 0) {
+                        const detailText = getCellText(nextCells[0]);
+                        if (detailText && !detailText.includes('educational institute')) {
+                            eduEntry.details = [detailText];
+                            i++; // Skip the detail row
+                        }
+                    }
+                }
+
+                if (eduEntry.institution || eduEntry.degree) {
+                    data.education.push(eduEntry);
+                }
+            }
+            i++;
+        }
+    }
+
+    // Table 5: Experience (company/title/date + responsibilities)
+    if (tables[5]) {
+        const rows = tables[5].getElementsByTagNameNS('*', 'tr');
+        let i = 0;
+        while (i < rows.length) {
+            const cells = rows[i].getElementsByTagNameNS('*', 'tc');
+            if (cells.length >= 3) {
+                const expEntry = {
+                    company: getCellText(cells[0]),
+                    title: getCellText(cells[1]),
+                    dates: getCellText(cells[2]),
+                    responsibilities: []
+                };
+
+                // Check if next row has responsibilities
+                if (i + 1 < rows.length) {
+                    const nextCells = rows[i + 1].getElementsByTagNameNS('*', 'tc');
+                    if (nextCells.length > 0) {
+                        // Get all paragraphs from first cell (they contain the bullet points)
+                        const responsibilities = getCellParagraphs(nextCells[0]);
+                        expEntry.responsibilities = responsibilities;
+                        i++; // Skip the responsibility row
+                    }
+                }
+
+                if (expEntry.company || expEntry.title) {
+                    data.experience.push(expEntry);
+                }
+            }
+            i++;
+        }
+    }
+
+    return data;
 }
 
 function parseResumeText(text) {
@@ -221,113 +395,265 @@ function parseResumeText(text) {
     return data;
 }
 
-function displayPreview(data) {
+async function displayPreview(data) {
     const preview = document.getElementById('resumePreview');
-    let html = '';
 
-    // Contact Information
+    // Check if docx-preview is loaded (it adds renderAsync to the docx namespace)
+    console.log('Checking for docx-preview...');
+    console.log('docx.renderAsync:', typeof docx.renderAsync);
+
+    if (typeof docx.renderAsync === 'function') {
+        // Use docx-preview to render actual DOCX
+        console.log('✓ Using true DOCX rendering with docx-preview...');
+        try {
+            const doc = await generateDocxDocument(data);
+            // Use docxLib (original library) for Packer
+            const docxLibrary = window.docxLib || window.docx;
+            const blob = await docxLibrary.Packer.toBlob(doc);
+
+            // Clear preview and render DOCX
+            preview.innerHTML = '';
+            preview.style.padding = '20px';
+            preview.style.backgroundColor = '#f5f5f5';
+
+            // Use docx.renderAsync from docx-preview library
+            await docx.renderAsync(blob, preview, null, {
+                className: 'docx-preview-container',
+                inWrapper: false, // Don't wrap in container - let it expand naturally
+                ignoreWidth: false,
+                ignoreHeight: false,
+                ignoreLastRenderedPageBreak: false,
+                experimental: false,
+                trimXmlDeclaration: true,
+                useBase64URL: false,
+                useMathMLPolyfill: false,
+                renderHeaders: true,
+                renderFooters: true,
+                renderFootnotes: true,
+                renderEndnotes: true,
+                debug: false
+            });
+
+            console.log('✓ DOCX preview rendered successfully!');
+            return;
+        } catch (error) {
+            console.error('✗ Error rendering DOCX preview:', error);
+            console.log('Falling back to HTML preview');
+            // Fall back to HTML preview
+        }
+    } else {
+        console.log('docx-preview not loaded, using HTML fallback');
+    }
+
+    // Fallback: HTML preview
+    // Create initial page
+    let html = '<div class="page"><div class="page-number">Page 1</div>';
+
+    // Contact Information Table (2x2)
     if (data.contact) {
-        html += '<div class="contact-info">';
-        html += `<h2>${data.contact.name || 'Name Not Provided'}</h2>`;
-        if (data.contact.email) html += `<div class="contact-detail">📧 ${data.contact.email}</div>`;
-        if (data.contact.phone) html += `<div class="contact-detail">📱 ${data.contact.phone}</div>`;
-        if (data.contact.location) html += `<div class="contact-detail">📍 ${data.contact.location}</div>`;
-        if (data.contact.linkedin) html += `<div class="contact-detail">🔗 ${data.contact.linkedin}</div>`;
-        if (data.contact.github) html += `<div class="contact-detail">💻 ${data.contact.github}</div>`;
-        html += '</div>';
+        html += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 10px;">';
+        html += '<tr>';
+        html += `<td style="width: 50%; font-weight: bold; font-size: 16pt;">${data.contact.name || 'Your Name'}</td>`;
+        html += `<td style="width: 50%; text-align: right; font-weight: bold; font-size: 16pt;">${data.contact.phone || ''}</td>`;
+        html += '</tr>';
+        html += '<tr>';
+        html += `<td style="font-size: 11pt;">${data.contact.location || ''}</td>`;
+        html += `<td style="text-align: right; font-size: 11pt;">${data.contact.email || ''}</td>`;
+        html += '</tr>';
+        html += '</table>';
     }
 
     // Objective
     if (data.objective) {
-        html += '<h3>Objective</h3>';
-        html += `<div class="objective">${data.objective}</div>`;
+        html += '<div style="text-align: center; font-weight: bold; font-size: 14pt; margin: 15px 0;">Objective</div>';
+        html += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">';
+        html += '<tr><td style="text-align: justify; padding: 5px 0;">';
+        html += data.objective;
+        html += '</td></tr></table>';
     }
 
-    // Skills
+    // Skills and Qualifications (2-column table)
     if (data.skills && data.skills.length > 0) {
-        html += '<h3>Skills</h3>';
-        html += '<div class="skills-list">';
-        data.skills.forEach(skill => {
-            html += `<span class="skill-tag">${skill}</span>`;
-        });
-        html += '</div>';
+        html += '<div style="text-align: center; font-weight: bold; font-size: 14pt; margin: 15px 0;">Skills and Qualifications</div>';
+        html += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">';
+        html += '<tr>';
+        html += '<td style="width: 50%; vertical-align: top; padding-right: 10px;">';
+        // Left column - even indexed skills
+        for (let i = 0; i < data.skills.length; i += 2) {
+            if (data.skills[i]) {
+                html += `<div style="margin: 3px 0;">• ${data.skills[i]}</div>`;
+            }
+        }
+        html += '</td>';
+        html += '<td style="width: 50%; vertical-align: top; padding-left: 10px;">';
+        // Right column - odd indexed skills
+        for (let i = 1; i < data.skills.length; i += 2) {
+            if (data.skills[i]) {
+                html += `<div style="margin: 3px 0;">• ${data.skills[i]}</div>`;
+            }
+        }
+        html += '</td>';
+        html += '</tr></table>';
     }
 
-    // Certificates
+    // Certificates (2-column table)
     if (data.certificates && data.certificates.length > 0) {
-        html += '<h3>Certificates</h3>';
-        html += '<div class="certificates-list">';
-        data.certificates.forEach(cert => {
-            html += `<div class="certificate-item">${cert}</div>`;
-        });
-        html += '</div>';
+        html += '<div style="text-align: center; font-weight: bold; font-size: 14pt; margin: 15px 0;">Certificates</div>';
+        html += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">';
+
+        // Calculate rows needed
+        const certRows = Math.ceil(data.certificates.length / 2);
+        for (let row = 0; row < certRows; row++) {
+            html += '<tr>';
+            const leftCert = data.certificates[row * 2];
+            const rightCert = data.certificates[row * 2 + 1];
+            html += '<td style="width: 50%; vertical-align: top; padding-right: 10px;">';
+            if (leftCert) html += `<div style="margin: 3px 0;">• ${leftCert}</div>`;
+            html += '</td>';
+            html += '<td style="width: 50%; vertical-align: top; padding-left: 10px;">';
+            if (rightCert) html += `<div style="margin: 3px 0;">• ${rightCert}</div>`;
+            html += '</td>';
+            html += '</tr>';
+        }
+        html += '</table>';
     }
 
-    // Education
+    // Education and Training
     if (data.education && data.education.length > 0) {
-        html += '<h3>Education</h3>';
-        html += '<div class="education-list">';
+        html += '<div style="text-align: center; font-weight: bold; font-size: 14pt; margin: 15px 0;">Education and Training</div>';
+
         data.education.forEach(edu => {
-            html += '<div class="education-item">';
-            html += `<h4>${edu.degree || 'Degree'}</h4>`;
-            html += `<div class="item-meta">${edu.institution || ''}</div>`;
-            if (edu.dates) html += `<div class="item-meta">${edu.dates}</div>`;
-            if (edu.location) html += `<div class="item-meta">${edu.location}</div>`;
+            html += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">';
+            // Header row: Institution/Degree | Date
+            html += '<tr>';
+            html += '<td style="width: 70%; font-weight: bold; vertical-align: top;">';
+            html += edu.institution || '';
+            if (edu.degree) html += `<br>${edu.degree}`;
+            html += '</td>';
+            html += `<td style="width: 30%; text-align: right; font-weight: bold; vertical-align: top;">${edu.dates || ''}</td>`;
+            html += '</tr>';
+            // Details row
             if (edu.details && edu.details.length > 0) {
+                html += '<tr><td colspan="2" style="padding-top: 5px;">';
                 edu.details.forEach(detail => {
-                    html += `<div style="margin-top: 10px; color: #444;">${detail}</div>`;
+                    html += `<div>${detail}</div>`;
                 });
+                html += '</td></tr>';
             }
-            html += '</div>';
+            html += '</table>';
         });
-        html += '</div>';
     }
 
-    // Experience
+    // Career History
     if (data.experience && data.experience.length > 0) {
-        html += '<h3>Experience</h3>';
-        html += '<div class="experience-list">';
+        html += '<div style="text-align: center; font-weight: bold; font-size: 14pt; margin: 15px 0;">Career History</div>';
+
         data.experience.forEach(exp => {
-            html += '<div class="experience-item">';
-            html += `<h4>${exp.title || 'Title'}</h4>`;
-            html += `<div class="item-meta">${exp.company || ''}</div>`;
-            if (exp.dates) html += `<div class="item-meta">${exp.dates}</div>`;
+            html += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">';
+            // Header row: Company | Title | Dates
+            html += '<tr>';
+            html += `<td style="width: 40%; font-weight: bold; vertical-align: top;">${exp.company || 'Company Name'}</td>`;
+            html += `<td style="width: 30%; text-align: center; font-weight: bold; vertical-align: top;">${exp.title || 'Job Title'}</td>`;
+            html += `<td style="width: 30%; text-align: right; font-weight: bold; vertical-align: top;">${exp.dates || ''}</td>`;
+            html += '</tr>';
+            // Responsibilities row (merged across all columns)
             if (exp.responsibilities && exp.responsibilities.length > 0) {
-                html += '<ul>';
+                html += '<tr><td colspan="3" style="padding-top: 5px;">';
                 exp.responsibilities.forEach(resp => {
-                    html += `<li>${resp}</li>`;
+                    html += `<div style="margin: 3px 0; text-align: justify;">• ${resp}</div>`;
                 });
-                html += '</ul>';
+                html += '</td></tr>';
             }
-            html += '</div>';
+            html += '</table>';
         });
-        html += '</div>';
     }
+
+    html += '</div>'; // Close page
 
     preview.innerHTML = html;
+
+    // Don't split into pages - let content flow naturally
+    // The HTML preview is just for quick reference
+    // The actual exported DOCX will have proper page breaks
 }
 
-async function exportToWord() {
-    if (!resumeData) {
-        showError('No resume data loaded');
-        return;
+// Split content into multiple pages
+function splitIntoPages() {
+    const preview = document.getElementById('resumePreview');
+    const page = preview.querySelector('.page');
+    if (!page) return;
+
+    // Get all content (excluding page number)
+    const pageNumber = page.querySelector('.page-number');
+    const children = Array.from(page.children).filter(child => !child.classList.contains('page-number'));
+
+    // Create a measuring div
+    const measuringDiv = document.createElement('div');
+    measuringDiv.style.position = 'absolute';
+    measuringDiv.style.visibility = 'hidden';
+    measuringDiv.style.width = '6.5in'; // 8.5in - 2in (for 1in margins on each side)
+    document.body.appendChild(measuringDiv);
+
+    // Disable page splitting for now - let content flow naturally in single page
+    // The actual DOCX rendering with docx-preview handles page breaks correctly
+    // This HTML fallback doesn't need perfect pagination
+
+    // Just keep everything on one page or use a very large page height
+    const pageHeight = 999999; // Effectively infinite - no page breaks in HTML preview
+    let currentPage = createNewPage(1);
+    let currentHeight = 0;
+
+    children.forEach(child => {
+        // Add child to current page (no breaking)
+        currentPage.appendChild(child.cloneNode(true));
+    });
+
+    // Add final page if it has content
+    if (currentPage.children.length > 1) { // More than just page number
+        preview.appendChild(currentPage);
     }
 
-    // Check if docx library is loaded
-    if (typeof docx === 'undefined') {
-        showError('Document generation library not loaded. Please refresh the page and try again.');
-        return;
+    // Clean up
+    document.body.removeChild(measuringDiv);
+
+    // Remove the original page if we created new pages
+    if (preview.querySelectorAll('.page').length > 1) {
+        page.remove();
+    }
+}
+
+// Create a new page element
+function createNewPage(pageNumber) {
+    const page = document.createElement('div');
+    page.className = 'page';
+
+    const pageNum = document.createElement('div');
+    pageNum.className = 'page-number';
+    pageNum.textContent = `Page ${pageNumber}`;
+    page.appendChild(pageNum);
+
+    return page;
+}
+
+// Generate DOCX document (without exporting)
+async function generateDocxDocument(data) {
+    // Use docxLib (the original docx.js library, saved before docx-preview loaded)
+    const docxLibrary = window.docxLib || window.docx;
+
+    if (typeof docxLibrary === 'undefined') {
+        throw new Error('docx library not loaded');
     }
 
-    try {
-        console.log('docx object:', docx);
-        const {
-            Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
-            AlignmentType, VerticalAlign, WidthType, BorderStyle,
-            convertInchesToTwip
-        } = docx;
+    const {
+        Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
+        AlignmentType, VerticalAlign, WidthType, BorderStyle,
+        convertInchesToTwip
+    } = docxLibrary;
 
-        const children = [];
+    const children = [];
+
+    // Use data parameter instead of resumeData
+    const resumeData = data;
 
         // Helper function to create section header
         function createSectionHeader(text) {
@@ -374,7 +700,12 @@ async function exportToWord() {
                             }),
                             new TableCell({
                                 children: [new Paragraph({
-                                    text: resumeData.contact.phone || '',
+                                    children: [new TextRun({
+                                        text: resumeData.contact.phone || '',
+                                        bold: true,
+                                        size: 32, // 16pt
+                                        font: 'Calibri'
+                                    })],
                                     alignment: AlignmentType.RIGHT
                                 })],
                                 width: { size: 50, type: WidthType.PERCENTAGE }
@@ -474,11 +805,11 @@ async function exportToWord() {
             children.push(new Paragraph({ text: '', spacing: { after: 200 } }));
         }
 
-        // Certificates (2-column table)
+        // Certificates (2-column table with bullets)
         if (resumeData.certificates && resumeData.certificates.length > 0) {
             children.push(createSectionHeader('Certificates'));
 
-            // Split certificates into two columns
+            // Split certificates into two columns with bullets
             const certRows = [];
             for (let i = 0; i < resumeData.certificates.length; i += 2) {
                 certRows.push(new TableRow({
@@ -486,14 +817,20 @@ async function exportToWord() {
                         new TableCell({
                             children: [new Paragraph({
                                 text: resumeData.certificates[i] || '',
-                                alignment: AlignmentType.LEFT
+                                alignment: AlignmentType.LEFT,
+                                bullet: {
+                                    level: 0
+                                }
                             })],
                             width: { size: 50, type: WidthType.PERCENTAGE }
                         }),
                         new TableCell({
                             children: [new Paragraph({
                                 text: resumeData.certificates[i + 1] || '',
-                                alignment: AlignmentType.LEFT
+                                alignment: AlignmentType.LEFT,
+                                bullet: {
+                                    level: 0
+                                }
                             })],
                             width: { size: 50, type: WidthType.PERCENTAGE }
                         })
@@ -540,7 +877,10 @@ async function exportToWord() {
                         }),
                         new TableCell({
                             children: [new Paragraph({
-                                text: edu.dates || '',
+                                children: [new TextRun({
+                                    text: edu.dates || '',
+                                    bold: true
+                                })],
                                 alignment: AlignmentType.RIGHT
                             })],
                             width: { size: 30, type: WidthType.PERCENTAGE }
@@ -609,7 +949,10 @@ async function exportToWord() {
                         }),
                         new TableCell({
                             children: [new Paragraph({
-                                text: exp.dates || '',
+                                children: [new TextRun({
+                                    text: exp.dates || '',
+                                    bold: true
+                                })],
                                 alignment: AlignmentType.RIGHT
                             })],
                             width: { size: 30, type: WidthType.PERCENTAGE }
@@ -617,40 +960,29 @@ async function exportToWord() {
                     ]
                 }));
 
-                // Responsibilities rows (3 columns for bullet points)
+                // Responsibilities row (single merged cell with bullets)
                 if (exp.responsibilities && exp.responsibilities.length > 0) {
-                    // Split responsibilities into groups of 3
-                    for (let i = 0; i < exp.responsibilities.length; i += 3) {
-                        const resp1 = exp.responsibilities[i] || '';
-                        const resp2 = exp.responsibilities[i + 1] || '';
-                        const resp3 = exp.responsibilities[i + 2] || '';
+                    // Create bullet paragraphs for each responsibility
+                    const bulletParagraphs = exp.responsibilities.map(resp =>
+                        new Paragraph({
+                            text: resp,
+                            alignment: AlignmentType.JUSTIFIED,
+                            bullet: {
+                                level: 0
+                            }
+                        })
+                    );
 
-                        expRows.push(new TableRow({
-                            children: [
-                                new TableCell({
-                                    children: [new Paragraph({
-                                        text: resp1 ? '• ' + resp1 : '',
-                                        alignment: AlignmentType.JUSTIFIED
-                                    })],
-                                    width: { size: 33, type: WidthType.PERCENTAGE }
-                                }),
-                                new TableCell({
-                                    children: [new Paragraph({
-                                        text: resp2 ? '• ' + resp2 : '',
-                                        alignment: AlignmentType.JUSTIFIED
-                                    })],
-                                    width: { size: 33, type: WidthType.PERCENTAGE }
-                                }),
-                                new TableCell({
-                                    children: [new Paragraph({
-                                        text: resp3 ? '• ' + resp3 : '',
-                                        alignment: AlignmentType.JUSTIFIED
-                                    })],
-                                    width: { size: 34, type: WidthType.PERCENTAGE }
-                                })
-                            ]
-                        }));
-                    }
+                    // Add row with merged cell spanning all 3 columns
+                    expRows.push(new TableRow({
+                        children: [
+                            new TableCell({
+                                children: bulletParagraphs,
+                                columnSpan: 3,
+                                width: { size: 100, type: WidthType.PERCENTAGE }
+                            })
+                        ]
+                    }));
                 }
 
                 const expTable = new Table({
@@ -670,14 +1002,72 @@ async function exportToWord() {
             });
         }
 
-        const doc = new Document({
-            sections: [{
-                properties: {},
-                children: children
-            }]
-        });
+    const doc = new Document({
+        styles: {
+            default: {
+                document: {
+                    run: {
+                        font: 'Times New Roman',
+                        size: 22 // 11pt
+                    },
+                    paragraph: {
+                        spacing: {
+                            line: 276, // 1.15 line spacing
+                            before: 0,
+                            after: 0
+                        }
+                    }
+                }
+            },
+            paragraphStyles: [
+                {
+                    id: 'Normal',
+                    name: 'Normal',
+                    basedOn: 'Normal',
+                    next: 'Normal',
+                    run: {
+                        font: 'Times New Roman',
+                        size: 22
+                    },
+                    paragraph: {
+                        spacing: {
+                            line: 276,
+                            before: 0,
+                            after: 0
+                        }
+                    }
+                }
+            ]
+        },
+        sections: [{
+            properties: {
+                page: {
+                    margin: {
+                        top: 1440, // 1 inch in twips
+                        right: 1440,
+                        bottom: 1440,
+                        left: 1440
+                    }
+                }
+            },
+            children: children
+        }]
+    });
 
-        const blob = await Packer.toBlob(doc);
+    return doc;
+}
+
+// Export to Word (uses generateDocxDocument)
+async function exportToWord() {
+    if (!resumeData) {
+        showError('No resume data loaded');
+        return;
+    }
+
+    try {
+        const doc = await generateDocxDocument(resumeData);
+        const docxLibrary = window.docxLib || window.docx;
+        const blob = await docxLibrary.Packer.toBlob(doc);
         const fileName = (resumeData.contact && resumeData.contact.name)
             ? `${resumeData.contact.name.replace(/\s+/g, '_')}_Resume.docx`
             : 'Resume.docx';

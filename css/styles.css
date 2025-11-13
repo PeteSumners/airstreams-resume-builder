@@ -114,6 +114,61 @@ main {
     border-radius: 8px;
     margin-bottom: 30px;
     border: 1px solid #dee2e6;
+    max-height: 800px;
+    overflow-y: auto;
+}
+
+/* docx-preview specific styles */
+.resume-preview .docx-wrapper {
+    background: white;
+    padding: 0;
+    margin: 0 auto;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.resume-preview .docx-wrapper > section.docx {
+    width: 8.5in !important;
+    min-height: 11in;
+    padding: 0;
+    margin: 0 auto 20px auto;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    background: white;
+    transform-origin: top center;
+}
+
+.resume-preview .docx {
+    transform: scale(1);
+    transform-origin: top center;
+}
+
+/* Multi-page preview styles */
+.page {
+    width: 8.5in;
+    /* No min-height - let content determine height */
+    padding: 1in;
+    margin: 0 auto 40px auto;
+    background: white;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    position: relative;
+    border: 1px solid #d0d0d0;
+    overflow: visible;
+    box-sizing: border-box;
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 11pt;
+    line-height: 1.15; /* Match Word's default line height */
+}
+
+.page:last-child {
+    page-break-after: auto;
+}
+
+.page-number {
+    position: absolute;
+    bottom: 0.5in;
+    right: 0.5in;
+    font-size: 10pt;
+    color: #666;
+    font-style: italic;
 }
 
 .resume-preview h3 {
