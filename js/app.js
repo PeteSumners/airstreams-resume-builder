@@ -321,215 +321,352 @@ async function exportToWord() {
 
     try {
         console.log('docx object:', docx);
-        const { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel, UnderlineType } = docx;
+        const {
+            Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
+            AlignmentType, VerticalAlign, WidthType, BorderStyle,
+            convertInchesToTwip
+        } = docx;
 
         const children = [];
 
-        // Contact Information
-        if (resumeData.contact) {
-            children.push(
-                new Paragraph({
-                    text: resumeData.contact.name || '',
-                    heading: HeadingLevel.HEADING_1,
-                    alignment: AlignmentType.CENTER,
-                    spacing: { after: 200 }
-                })
-            );
-
-            const contactDetails = [];
-            if (resumeData.contact.phone) contactDetails.push(resumeData.contact.phone);
-            if (resumeData.contact.email) contactDetails.push(resumeData.contact.email);
-            if (resumeData.contact.location) contactDetails.push(resumeData.contact.location);
-            if (resumeData.contact.linkedin) contactDetails.push(resumeData.contact.linkedin);
-            if (resumeData.contact.github) contactDetails.push(resumeData.contact.github);
-
-            if (contactDetails.length > 0) {
-                children.push(
-                    new Paragraph({
-                        text: contactDetails.join(' | '),
-                        alignment: AlignmentType.CENTER,
-                        spacing: { after: 200 }
+        // Helper function to create section header
+        function createSectionHeader(text) {
+            return new Paragraph({
+                children: [
+                    new TextRun({
+                        text: text,
+                        bold: true,
+                        size: 28, // 14pt
+                        font: 'Calibri'
                     })
-                );
-            }
+                ],
+                alignment: AlignmentType.CENTER,
+                spacing: { before: 200, after: 200 }
+            });
+        }
+
+        // Contact Information Table (2x2)
+        if (resumeData.contact) {
+            const contactTable = new Table({
+                width: { size: 100, type: WidthType.PERCENTAGE },
+                borders: {
+                    top: { style: BorderStyle.NONE },
+                    bottom: { style: BorderStyle.NONE },
+                    left: { style: BorderStyle.NONE },
+                    right: { style: BorderStyle.NONE },
+                    insideHorizontal: { style: BorderStyle.NONE },
+                    insideVertical: { style: BorderStyle.NONE }
+                },
+                rows: [
+                    new TableRow({
+                        children: [
+                            new TableCell({
+                                children: [new Paragraph({
+                                    children: [new TextRun({
+                                        text: resumeData.contact.name || 'Your Name',
+                                        bold: true,
+                                        size: 32, // 16pt
+                                        font: 'Calibri'
+                                    })],
+                                    alignment: AlignmentType.LEFT
+                                })],
+                                width: { size: 50, type: WidthType.PERCENTAGE }
+                            }),
+                            new TableCell({
+                                children: [new Paragraph({
+                                    text: resumeData.contact.phone || '',
+                                    alignment: AlignmentType.RIGHT
+                                })],
+                                width: { size: 50, type: WidthType.PERCENTAGE }
+                            })
+                        ]
+                    }),
+                    new TableRow({
+                        children: [
+                            new TableCell({
+                                children: [new Paragraph({
+                                    text: resumeData.contact.location || '',
+                                    alignment: AlignmentType.LEFT
+                                })]
+                            }),
+                            new TableCell({
+                                children: [new Paragraph({
+                                    text: resumeData.contact.email || '',
+                                    alignment: AlignmentType.RIGHT
+                                })]
+                            })
+                        ]
+                    })
+                ]
+            });
+            children.push(contactTable);
+            children.push(new Paragraph({ text: '', spacing: { after: 200 } }));
         }
 
         // Objective
         if (resumeData.objective) {
-            children.push(
-                new Paragraph({
-                    text: 'OBJECTIVE',
-                    heading: HeadingLevel.HEADING_2,
-                    spacing: { before: 200, after: 100 }
-                })
-            );
-            children.push(
-                new Paragraph({
-                    text: resumeData.objective,
-                    spacing: { after: 200 }
-                })
-            );
-        }
-
-        // Skills
-        if (resumeData.skills && resumeData.skills.length > 0) {
-            children.push(
-                new Paragraph({
-                    text: 'SKILLS',
-                    heading: HeadingLevel.HEADING_2,
-                    spacing: { before: 200, after: 100 }
-                })
-            );
-            children.push(
-                new Paragraph({
-                    text: resumeData.skills.join(' • '),
-                    spacing: { after: 200 }
-                })
-            );
-        }
-
-        // Certificates
-        if (resumeData.certificates && resumeData.certificates.length > 0) {
-            children.push(
-                new Paragraph({
-                    text: 'CERTIFICATES',
-                    heading: HeadingLevel.HEADING_2,
-                    spacing: { before: 200, after: 100 }
-                })
-            );
-            resumeData.certificates.forEach(cert => {
-                children.push(
-                    new Paragraph({
-                        text: '• ' + cert,
-                        spacing: { after: 100 }
+            children.push(createSectionHeader('Objective'));
+            const objectiveTable = new Table({
+                width: { size: 100, type: WidthType.PERCENTAGE },
+                borders: {
+                    top: { style: BorderStyle.NONE },
+                    bottom: { style: BorderStyle.NONE },
+                    left: { style: BorderStyle.NONE },
+                    right: { style: BorderStyle.NONE }
+                },
+                rows: [
+                    new TableRow({
+                        children: [
+                            new TableCell({
+                                children: [new Paragraph({
+                                    text: resumeData.objective,
+                                    alignment: AlignmentType.JUSTIFIED
+                                })]
+                            })
+                        ]
                     })
-                );
+                ]
             });
+            children.push(objectiveTable);
+            children.push(new Paragraph({ text: '', spacing: { after: 200 } }));
         }
 
-        // Education
+        // Skills and Qualifications (2-column table)
+        if (resumeData.skills && resumeData.skills.length > 0) {
+            children.push(createSectionHeader('Skills and Qualifications'));
+
+            // Split skills into two columns
+            const skillRows = [];
+            for (let i = 0; i < resumeData.skills.length; i += 2) {
+                skillRows.push(new TableRow({
+                    children: [
+                        new TableCell({
+                            children: [new Paragraph({
+                                text: resumeData.skills[i] || '',
+                                alignment: AlignmentType.LEFT
+                            })],
+                            width: { size: 50, type: WidthType.PERCENTAGE }
+                        }),
+                        new TableCell({
+                            children: [new Paragraph({
+                                text: resumeData.skills[i + 1] || '',
+                                alignment: AlignmentType.LEFT
+                            })],
+                            width: { size: 50, type: WidthType.PERCENTAGE }
+                        })
+                    ]
+                }));
+            }
+
+            const skillsTable = new Table({
+                width: { size: 100, type: WidthType.PERCENTAGE },
+                borders: {
+                    top: { style: BorderStyle.NONE },
+                    bottom: { style: BorderStyle.NONE },
+                    left: { style: BorderStyle.NONE },
+                    right: { style: BorderStyle.NONE },
+                    insideHorizontal: { style: BorderStyle.NONE },
+                    insideVertical: { style: BorderStyle.NONE }
+                },
+                rows: skillRows
+            });
+            children.push(skillsTable);
+            children.push(new Paragraph({ text: '', spacing: { after: 200 } }));
+        }
+
+        // Certificates (2-column table)
+        if (resumeData.certificates && resumeData.certificates.length > 0) {
+            children.push(createSectionHeader('Certificates'));
+
+            // Split certificates into two columns
+            const certRows = [];
+            for (let i = 0; i < resumeData.certificates.length; i += 2) {
+                certRows.push(new TableRow({
+                    children: [
+                        new TableCell({
+                            children: [new Paragraph({
+                                text: resumeData.certificates[i] || '',
+                                alignment: AlignmentType.LEFT
+                            })],
+                            width: { size: 50, type: WidthType.PERCENTAGE }
+                        }),
+                        new TableCell({
+                            children: [new Paragraph({
+                                text: resumeData.certificates[i + 1] || '',
+                                alignment: AlignmentType.LEFT
+                            })],
+                            width: { size: 50, type: WidthType.PERCENTAGE }
+                        })
+                    ]
+                }));
+            }
+
+            const certsTable = new Table({
+                width: { size: 100, type: WidthType.PERCENTAGE },
+                borders: {
+                    top: { style: BorderStyle.NONE },
+                    bottom: { style: BorderStyle.NONE },
+                    left: { style: BorderStyle.NONE },
+                    right: { style: BorderStyle.NONE },
+                    insideHorizontal: { style: BorderStyle.NONE },
+                    insideVertical: { style: BorderStyle.NONE }
+                },
+                rows: certRows
+            });
+            children.push(certsTable);
+            children.push(new Paragraph({ text: '', spacing: { after: 200 } }));
+        }
+
+        // Education and Training (table with institution/date columns)
         if (resumeData.education && resumeData.education.length > 0) {
-            children.push(
-                new Paragraph({
-                    text: 'EDUCATION',
-                    heading: HeadingLevel.HEADING_2,
-                    spacing: { before: 200, after: 100 }
-                })
-            );
+            children.push(createSectionHeader('Education and Training'));
+
             resumeData.education.forEach(edu => {
-                children.push(
-                    new Paragraph({
-                        children: [
-                            new TextRun({
-                                text: edu.institution || '',
-                                bold: true
-                            })
-                        ],
-                        spacing: { after: 50 }
-                    })
-                );
-                children.push(
-                    new Paragraph({
-                        children: [
-                            new TextRun({
-                                text: edu.degree || '',
-                                italics: true
-                            })
-                        ],
-                        spacing: { after: 50 }
-                    })
-                );
-                if (edu.dates) {
-                    children.push(
-                        new Paragraph({
-                            text: edu.dates,
-                            spacing: { after: 50 }
+                const eduRows = [];
+
+                // First row: Institution/Program and Date
+                eduRows.push(new TableRow({
+                    children: [
+                        new TableCell({
+                            children: [new Paragraph({
+                                children: [
+                                    new TextRun({
+                                        text: (edu.institution || '') + (edu.degree ? '\n' + edu.degree : ''),
+                                        bold: true
+                                    })
+                                ]
+                            })],
+                            width: { size: 70, type: WidthType.PERCENTAGE }
+                        }),
+                        new TableCell({
+                            children: [new Paragraph({
+                                text: edu.dates || '',
+                                alignment: AlignmentType.RIGHT
+                            })],
+                            width: { size: 30, type: WidthType.PERCENTAGE }
                         })
-                    );
-                }
-                if (edu.location) {
-                    children.push(
-                        new Paragraph({
-                            text: edu.location,
-                            spacing: { after: 50 }
-                        })
-                    );
-                }
+                    ]
+                }));
+
+                // Details rows (if any)
                 if (edu.details && edu.details.length > 0) {
                     edu.details.forEach(detail => {
-                        children.push(
-                            new Paragraph({
-                                text: detail,
-                                spacing: { after: 50 }
-                            })
-                        );
+                        eduRows.push(new TableRow({
+                            children: [
+                                new TableCell({
+                                    children: [new Paragraph({ text: detail })],
+                                    columnSpan: 2
+                                })
+                            ]
+                        }));
                     });
                 }
-                children.push(
-                    new Paragraph({
-                        text: '',
-                        spacing: { after: 100 }
-                    })
-                );
+
+                const eduTable = new Table({
+                    width: { size: 100, type: WidthType.PERCENTAGE },
+                    borders: {
+                        top: { style: BorderStyle.NONE },
+                        bottom: { style: BorderStyle.NONE },
+                        left: { style: BorderStyle.NONE },
+                        right: { style: BorderStyle.NONE },
+                        insideHorizontal: { style: BorderStyle.NONE },
+                        insideVertical: { style: BorderStyle.NONE }
+                    },
+                    rows: eduRows
+                });
+                children.push(eduTable);
+                children.push(new Paragraph({ text: '', spacing: { after: 100 } }));
             });
         }
 
-        // Experience
+        // Career History (3-column table for experiences)
         if (resumeData.experience && resumeData.experience.length > 0) {
-            children.push(
-                new Paragraph({
-                    text: 'EXPERIENCE',
-                    heading: HeadingLevel.HEADING_2,
-                    spacing: { before: 200, after: 100 }
-                })
-            );
+            children.push(createSectionHeader('Career History'));
+
             resumeData.experience.forEach(exp => {
-                children.push(
-                    new Paragraph({
-                        children: [
-                            new TextRun({
-                                text: exp.company || '',
-                                bold: true
-                            })
-                        ],
-                        spacing: { after: 50 }
-                    })
-                );
-                children.push(
-                    new Paragraph({
-                        children: [
-                            new TextRun({
-                                text: exp.title || '',
-                                italics: true
-                            })
-                        ],
-                        spacing: { after: 50 }
-                    })
-                );
-                if (exp.dates) {
-                    children.push(
-                        new Paragraph({
-                            text: exp.dates,
-                            spacing: { after: 100 }
+                const expRows = [];
+
+                // Header row: Company, Title, Dates
+                expRows.push(new TableRow({
+                    children: [
+                        new TableCell({
+                            children: [new Paragraph({
+                                children: [new TextRun({
+                                    text: exp.company || 'Company Name',
+                                    bold: true
+                                })]
+                            })],
+                            width: { size: 40, type: WidthType.PERCENTAGE }
+                        }),
+                        new TableCell({
+                            children: [new Paragraph({
+                                children: [new TextRun({
+                                    text: exp.title || 'Job Title',
+                                    bold: true
+                                })]
+                            })],
+                            width: { size: 30, type: WidthType.PERCENTAGE }
+                        }),
+                        new TableCell({
+                            children: [new Paragraph({
+                                text: exp.dates || '',
+                                alignment: AlignmentType.RIGHT
+                            })],
+                            width: { size: 30, type: WidthType.PERCENTAGE }
                         })
-                    );
-                }
+                    ]
+                }));
+
+                // Responsibilities rows (3 columns for bullet points)
                 if (exp.responsibilities && exp.responsibilities.length > 0) {
-                    exp.responsibilities.forEach(resp => {
-                        children.push(
-                            new Paragraph({
-                                text: '• ' + resp,
-                                spacing: { after: 50 }
-                            })
-                        );
-                    });
+                    // Split responsibilities into groups of 3
+                    for (let i = 0; i < exp.responsibilities.length; i += 3) {
+                        const resp1 = exp.responsibilities[i] || '';
+                        const resp2 = exp.responsibilities[i + 1] || '';
+                        const resp3 = exp.responsibilities[i + 2] || '';
+
+                        expRows.push(new TableRow({
+                            children: [
+                                new TableCell({
+                                    children: [new Paragraph({
+                                        text: resp1 ? '• ' + resp1 : '',
+                                        alignment: AlignmentType.JUSTIFIED
+                                    })],
+                                    width: { size: 33, type: WidthType.PERCENTAGE }
+                                }),
+                                new TableCell({
+                                    children: [new Paragraph({
+                                        text: resp2 ? '• ' + resp2 : '',
+                                        alignment: AlignmentType.JUSTIFIED
+                                    })],
+                                    width: { size: 33, type: WidthType.PERCENTAGE }
+                                }),
+                                new TableCell({
+                                    children: [new Paragraph({
+                                        text: resp3 ? '• ' + resp3 : '',
+                                        alignment: AlignmentType.JUSTIFIED
+                                    })],
+                                    width: { size: 34, type: WidthType.PERCENTAGE }
+                                })
+                            ]
+                        }));
+                    }
                 }
-                children.push(
-                    new Paragraph({
-                        text: '',
-                        spacing: { after: 100 }
-                    })
-                );
+
+                const expTable = new Table({
+                    width: { size: 100, type: WidthType.PERCENTAGE },
+                    borders: {
+                        top: { style: BorderStyle.NONE },
+                        bottom: { style: BorderStyle.NONE },
+                        left: { style: BorderStyle.NONE },
+                        right: { style: BorderStyle.NONE },
+                        insideHorizontal: { style: BorderStyle.NONE },
+                        insideVertical: { style: BorderStyle.NONE }
+                    },
+                    rows: expRows
+                });
+                children.push(expTable);
+                children.push(new Paragraph({ text: '', spacing: { after: 200 } }));
             });
         }
 
